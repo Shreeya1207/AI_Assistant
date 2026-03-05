@@ -138,6 +138,13 @@ app.get('/api/customers/search', async (req, res) => {
     try {
         const all = await getAll('customers');
         const customer = findCustomer(name.trim(), all);
+        // Update last_visit immediately on lookup so every interaction is tracked
+        if (customer) {
+            const today = new Date().toISOString().split('T')[0];
+            await db.collection('customers').doc(customer.id).update({ last_visit: today });
+            customer.last_visit = today;
+            console.log(`👤 Patient visit recorded: ${customer.name} → ${today}`);
+        }
         res.json({ found: !!customer, customer: customer || null });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -198,6 +205,27 @@ app.get('/api/customers/:id', async (req, res) => {
         res.json({ ...docToObj(docSnap), purchase_history: history });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── ROUTE: Save OCR prescription text to customer record ─────────────────────
+app.post('/api/customers/:id/prescription', async (req, res) => {
+    const { ocrText } = req.body;
+    if (!ocrText || !ocrText.trim()) {
+        return res.status(400).json({ success: false, error: 'ocrText is required' });
+    }
+    try {
+        await db.collection('customers').doc(req.params.id).update({
+            prescriptions: firebase.firestore.FieldValue.arrayUnion({
+                text: ocrText.trim(),
+                scanned_at: new Date().toISOString(),
+            }),
+        });
+        console.log(`📋 OCR prescription saved → customer ${req.params.id}`);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('❌ Prescription save error:', err.message);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
